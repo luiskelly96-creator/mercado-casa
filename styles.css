@@ -1,0 +1,132 @@
+/* ===== Mercado Casa — estilos (mobile first) ===== */
+:root {
+  --teal: #0f766e;
+  --teal-600: #0d9488;
+  --bg: #f1f5f9;
+  --card: #ffffff;
+  --text: #0f172a;
+  --muted: #64748b;
+  --line: #e2e8f0;
+  --danger: #dc2626;
+  --warn: #b45309;
+  --warn-bg: #fef3c7;
+  --ok: #16a34a;
+  --radius: 14px;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  padding-bottom: 76px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Barra superior */
+.topbar {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 12px 16px;
+  background: var(--teal); color: #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .15);
+}
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand h1 { font-size: 1.05rem; margin: 0; font-weight: 600; letter-spacing: .2px; }
+.logo { font-size: 1.3rem; }
+.icon-btn {
+  background: rgba(255, 255, 255, .15); color: #fff;
+  border: 0; border-radius: 10px; width: 40px; height: 40px;
+  font-size: 1.2rem; cursor: pointer;
+}
+.icon-btn:active { background: rgba(255, 255, 255, .3); }
+
+/* Contenido */
+.vista { padding: 14px; max-width: 720px; margin: 0 auto; }
+.card {
+  background: var(--card); border-radius: var(--radius);
+  padding: 14px; margin-bottom: 14px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, .08);
+}
+.card h2 { font-size: .95rem; margin: 0 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+
+/* Formularios */
+.fila { display: flex; gap: 8px; }
+input, select, button { font: inherit; }
+input, select {
+  width: 100%; padding: 12px; border: 1px solid var(--line);
+  border-radius: 10px; background: #fff; color: var(--text);
+}
+input:focus, select:focus { outline: 2px solid var(--teal-600); border-color: var(--teal-600); }
+.btn {
+  border: 0; border-radius: 10px; padding: 12px 16px;
+  background: var(--teal); color: #fff; font-weight: 600; cursor: pointer;
+  white-space: nowrap;
+}
+.btn:active { transform: scale(.98); }
+.btn.sec { background: #e2e8f0; color: var(--text); }
+.btn.danger { background: var(--danger); }
+.btn.mini { padding: 8px 12px; font-size: .85rem; }
+.btn:disabled { opacity: .5; cursor: default; }
+
+/* Listas de ítems */
+.item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 4px; border-bottom: 1px solid var(--line);
+}
+.item:last-child { border-bottom: 0; }
+.item .check {
+  width: 26px; height: 26px; flex: none; border-radius: 50%;
+  border: 2px solid var(--teal-600); background: transparent; cursor: pointer;
+}
+.item .check.on { background: var(--teal-600); border-color: var(--teal-600); color: #fff; }
+.item .info { flex: 1; min-width: 0; }
+.item .nombre { font-weight: 600; }
+.item .meta { font-size: .8rem; color: var(--muted); }
+.item.comprado .nombre { text-decoration: line-through; color: var(--muted); }
+.item .acciones { display: flex; gap: 6px; }
+
+.stock-ctrl { display: flex; align-items: center; gap: 6px; }
+.stock-ctrl button {
+  width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--line);
+  background: #fff; font-size: 1.1rem; cursor: pointer;
+}
+.stock-num { min-width: 42px; text-align: center; font-weight: 700; }
+.bajo { color: var(--warn); }
+.bajo .stock-num { background: var(--warn-bg); border-radius: 8px; }
+
+.vacio { color: var(--muted); text-align: center; padding: 22px 8px; }
+.chip {
+  display: inline-block; font-size: .72rem; padding: 2px 8px;
+  border-radius: 999px; background: #e2e8f0; color: #334155; margin-left: 6px;
+}
+
+/* Barra inferior de navegación */
+.tabbar {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
+  display: flex; background: #fff; border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.tab {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  background: none; border: 0; padding: 10px 0 8px; color: var(--muted);
+  font-size: 1.2rem; cursor: pointer;
+}
+.tab span { font-size: .7rem; font-weight: 600; }
+.tab.activo { color: var(--teal); }
+
+/* Aviso flotante */
+.toast {
+  position: fixed; left: 50%; bottom: 92px; transform: translateX(-50%) translateY(20px);
+  background: #0f172a; color: #fff; padding: 10px 16px; border-radius: 10px;
+  font-size: .9rem; opacity: 0; pointer-events: none; transition: .2s; z-index: 20;
+  max-width: 90vw; text-align: center;
+}
+.toast.ver { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.error { background: var(--danger); }
+.toast.ok { background: var(--ok); }
+
+.ayuda { font-size: .82rem; color: var(--muted); line-height: 1.5; }
+.ayuda a { color: var(--teal); }
+label.campo { display: block; font-size: .82rem; color: var(--muted); margin: 10px 0 4px; }
