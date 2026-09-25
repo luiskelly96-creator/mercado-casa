@@ -1,51 +1,49 @@
-// ===== Mercado Casa — lógica de la app =====
-// Este archivo habla con tu API de Google Apps Script (definida en Code.gs).
+// ===== Mercado Casa — lógica de la app (v2 · Login Google) =====
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const state = {
   vista: 'lista',
+  usuario: null,
   productos: [],
   lista: [],
   filtro: '',
   cargando: false
 };
 
-/* ---------- Configuración (URL de la API + token) ---------- */
+/* ---------- Configuración ---------- */
 const cfg = {
-  get api() {
-    return localStorage.getItem('mc_api') ||
-      (window.MERCADO_CONFIG && window.MERCADO_CONFIG.API_URL) || '';
+  get api() { return (window.MERCADO_CONFIG && window.MERCADO_CONFIG.API_URL) || ''; },
+  get clientId() { return (window.MERCADO_CONFIG && window.MERCADO_CONFIG.CLIENT_ID) || ''; },
+  get session() { return localStorage.getItem('mc_session') || ''; },
+  get nombre() { return localStorage.getItem('mc_nombre') || ''; },
+  get email() { return localStorage.getItem('mc_email') || ''; },
+  get token() { return localStorage.getItem('mc_token') || ''; },
+  iniciarSesion(session, email, nombre) {
+    localStorage.setItem('mc_session', session);
+    localStorage.setItem('mc_email', email || '');
+    localStorage.setItem('mc_nombre', nombre || '');
   },
-  get token() {
-    return localStorage.getItem('mc_token') ||
-      (window.MERCADO_CONFIG && window.MERCADO_CONFIG.TOKEN) || '';
+  cerrarSesion() {
+    ['mc_session', 'mc_email', 'mc_nombre'].forEach(k => localStorage.removeItem(k));
   },
-  guardar(api, token) {
-    localStorage.setItem('mc_api', api.trim());
-    localStorage.setItem('mc_token', token.trim());
-  },
-  lista() {
-    return !!this.api && !!this.token;
-  }
+  guardarToken(t) { localStorage.setItem('mc_token', t || ''); }
 };
 
-/* ---------- Llamadas a la API ---------- */
-// GET: la URL de Apps Script redirige a googleusercontent.com, que sí permite CORS.
+/* ---------- API ---------- */
 async function apiGet(action) {
   const url = cfg.api + '?action=' + encodeURIComponent(action) +
+    '&session=' + encodeURIComponent(cfg.session) +
     '&token=' + encodeURIComponent(cfg.token) + '&_=' + Date.now();
   const res = await fetch(url);
   return res.json();
 }
-
-// POST con Content-Type "text/plain" para evitar el "preflight" que Apps Script no maneja.
 async function apiPost(action, data) {
   const res = await fetch(cfg.api, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action, token: cfg.token, data: data || {} })
+    body: JSON.stringify({ action, session: cfg.session, token: cfg.token, data: data || {} })
   });
   return res.json();
 }
@@ -65,14 +63,10 @@ function toast(msg, tipo = '') {
   el.textContent = msg;
   el.className = 'toast ver ' + tipo;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.className = 'toast'; }, 2600);
+  toastTimer = setTimeout(() => { el.className = 'toast'; }, 3000);
 }
 
-function quien() {
-  let q = localStorage.getItem('mc_quien');
-  if (!q) { q = prompt('¿Tu nombre? (para saber quién agregó cada cosa)', '') || ''; localStorage.setItem('mc_quien', q); }
-  return q;
-}
+const quien = () => state.usuario ? (state.usuario.nombre || state.usuario.email) : '';
 
 /* ---------- Arranque ---------- */
 function init() {
@@ -81,24 +75,41 @@ function init() {
   document.addEventListener('click', onClick);
   document.addEventListener('submit', onSubmit);
 
-  irA(cfg.lista() ? 'lista' : 'ajustes');
-  if (cfg.lista()) cargar();
+  if (!cfg.api) { toast('Falta configurar la URL de la API', 'error'); return; }
+
+  if (!cfg.session && !cfg.token) {
+    irA('login');
+  } else {
+    irA('lista');
+    cargar();
+  }
 }
 
 function irA(vista) {
   state.vista = vista;
-  $$('.tab').forEach(t => t.classList.toggle('activo', t.dataset.vista === vista));
+  const logueado = !!state.usuario || !!cfg.session || !!cfg.token;
+  $$('.tab').forEach(t => {
+    t.style.display = (vista === 'login' && t.dataset.vista === 'ajustes') ? 'flex' : '';
+    t.classList.toggle('activo', t.dataset.vista === vista);
+  });
   render();
 }
 
+/* ---------- Carga de datos ---------- */
 async function cargar() {
-  if (!cfg.lista()) { irA('ajustes'); return; }
+  if (!cfg.session && !cfg.token) { irA('login'); return; }
   state.cargando = true; render();
   try {
     const r = await apiGet('getAll');
+    if (r && r.codigo === 'AUTH') {
+      cfg.cerrarSesion();
+      toast('Tu sesión expiró, vuelve a entrar', 'error');
+      state.usuario = null; irA('login'); return;
+    }
     if (!r || !r.ok) throw new Error((r && r.error) || 'Respuesta inválida');
     state.productos = r.productos || [];
     state.lista = r.lista || [];
+    state.usuario = r.usuario || { nombre: cfg.nombre, email: cfg.email };
   } catch (e) {
     toast('No se pudo conectar: ' + e.message, 'error');
   }
@@ -108,20 +119,65 @@ async function cargar() {
 /* ---------- Render ---------- */
 function render() {
   const v = $('#vista');
+  if (state.vista === 'login') { v.innerHTML = vistaLogin(); initGSI(); return; }
+  if (!state.usuario && !cfg.session && !cfg.token) { state.vista = 'login'; v.innerHTML = vistaLogin(); initGSI(); return; }
   if (state.vista === 'ajustes') { v.innerHTML = vistaAjustes(); return; }
-  if (!cfg.lista()) { irA('ajustes'); return; }
   v.innerHTML = state.vista === 'lista' ? vistaLista() : vistaDespensa();
 }
 
-/* ----- Vista: Lista de mercado ----- */
+/* ----- Vista: Login ----- */
+function vistaLogin() {
+  const listo = cfg.clientId && cfg.clientId.indexOf('PENDIENTE') !== 0;
+  return `
+    <div class="card" style="text-align:center">
+      <div style="font-size:2.6rem">🛒</div>
+      <h2 style="margin-top:6px">Mercado Casa</h2>
+      <p class="ayuda">Entra con tu cuenta de Google autorizada para ver y editar la lista de la familia.</p>
+      <div id="gbtn" style="display:flex;justify-content:center;margin-top:14px"></div>
+      ${listo ? '' : '<p class="ayuda" style="color:#b45309;margin-top:12px">Falta configurar el CLIENT_ID de Google en config.js</p>'}
+    </div>
+    <div class="card">
+      <h2>¿No puedes entrar?</h2>
+      <p class="ayuda">Tu correo debe estar autorizado en la pestaña <b>usuarios</b> de la Hoja de Google.
+      Pídele al dueño que agregue tu correo y vuelve a intentar.</p>
+      <button class="btn sec" data-ir="ajustes" style="margin-top:10px">Opciones avanzadas</button>
+    </div>`;
+}
+
+let gsiListo = false;
+function initGSI() {
+  if (gsiListo || !cfg.clientId || cfg.clientId.indexOf('PENDIENTE') === 0) return;
+  if (!(window.google && window.google.accounts && window.google.accounts.id)) {
+    setTimeout(initGSI, 200); return;
+  }
+  try {
+    google.accounts.id.initialize({ client_id: cfg.clientId, callback: onCredential });
+    const el = document.getElementById('gbtn');
+    if (el) google.accounts.id.renderButton(el, { theme: 'filled_blue', size: 'large', width: 260, text: 'signin_with', locale: 'es' });
+    gsiListo = true;
+  } catch (e) { setTimeout(initGSI, 400); }
+}
+
+async function onCredential(resp) {
+  if (!resp || !resp.credential) return;
+  try {
+    const r = await apiPost('login', { credential: resp.credential });
+    if (!r.ok) throw new Error(r.error || 'No autorizado');
+    cfg.iniciarSesion(r.session, r.email, r.nombre);
+    state.usuario = { email: r.email, nombre: r.nombre };
+    toast('Bienvenido, ' + (r.nombre || r.email), 'ok');
+    irA('lista'); cargar();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+/* ----- Vista: Lista ----- */
 function vistaLista() {
   const pend = state.lista.filter(i => i.estado !== 'comprado');
   const comp = state.lista.filter(i => i.estado === 'comprado');
 
   const itemLi = (i) => `
     <div class="item ${i.estado === 'comprado' ? 'comprado' : ''}">
-      <button class="check ${i.estado === 'comprado' ? 'on' : ''}" data-toggle="${esc(i.id)}"
-        title="${i.estado === 'comprado' ? 'Devolver a pendientes' : 'Marcar comprado'}">
+      <button class="check ${i.estado === 'comprado' ? 'on' : ''}" data-toggle="${esc(i.id)}">
         ${i.estado === 'comprado' ? '✓' : ''}
       </button>
       <div class="info">
@@ -142,9 +198,7 @@ function vistaLista() {
             <option>und</option><option>kg</option><option>g</option><option>lt</option><option>ml</option><option>paq</option>
           </select>
         </div>
-        <div class="fila" style="margin-top:8px">
-          <button class="btn" type="submit">+ Agregar</button>
-        </div>
+        <div class="fila" style="margin-top:8px"><button class="btn" type="submit">+ Agregar</button></div>
       </form>
     </div>
 
@@ -157,9 +211,7 @@ function vistaLista() {
     <div class="card">
       <h2>Comprados ${hoyTexto()}</h2>
       ${comp.map(itemLi).join('')}
-      <div style="margin-top:12px">
-        <button class="btn sec" data-limpiar="1">Limpiar comprados</button>
-      </div>
+      <div style="margin-top:12px"><button class="btn sec" data-limpiar="1">Limpiar comprados</button></div>
     </div>` : ''}
   `;
 }
@@ -169,9 +221,7 @@ function vistaDespensa() {
   const f = state.filtro.trim().toLowerCase();
   let prods = state.productos
     .filter(p => String(p.activo).toLowerCase() !== 'false')
-    .filter(p => !f || String(p.nombre).toLowerCase().includes(f) ||
-                 String(p.categoria).toLowerCase().includes(f));
-
+    .filter(p => !f || String(p.nombre).toLowerCase().includes(f) || String(p.categoria).toLowerCase().includes(f));
   prods.sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
 
   const fila = (p) => {
@@ -234,46 +284,57 @@ function vistaDespensa() {
 
 /* ----- Vista: Ajustes ----- */
 function vistaAjustes() {
+  const sesion = cfg.session || cfg.token;
   return `
     <div class="card">
-      <h2>Conexión</h2>
-      <p class="ayuda">Pega la URL de tu implementación de Apps Script y el token que definiste en <code>Code.gs</code>.</p>
-      <label class="campo">URL de la API (termina en /exec)</label>
-      <input id="inApi" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(cfg.api)}">
-      <label class="campo">Token secreto</label>
-      <input id="inToken" placeholder="mercado-casa-2026" value="${esc(cfg.token)}">
-      <label class="campo">Tu nombre (para saber quién agregó cada cosa)</label>
-      <input id="inQuien" placeholder="Ej: Luis" value="${esc(localStorage.getItem('mc_quien') || '')}">
+      <h2>Cuenta</h2>
+      ${sesion ? `
+        <p class="ayuda">Sesión activa:<br><b>${esc(state.usuario ? (state.usuario.nombre || '') : cfg.nombre)}</b><br>${esc(state.usuario ? state.usuario.email : cfg.email)}</p>
+        <button class="btn danger" data-logout="1" style="margin-top:12px">Cerrar sesión</button>
+      ` : `
+        <p class="ayuda">No has iniciado sesión.</p>
+        <button class="btn" data-ir="login" style="margin-top:10px">Iniciar sesión con Google</button>
+      `}
+    </div>
+
+    <div class="card">
+      <h2>Avanzado (dueño)</h2>
+      <p class="ayuda">Solo para el administrador. El token permite ejecutar tareas de mantenimiento.</p>
+      <label class="campo">Token del dueño</label>
+      <input id="inToken" placeholder="token" value="${esc(cfg.token)}">
       <div class="fila" style="margin-top:14px">
-        <button class="btn" data-guardar="1">Guardar</button>
+        <button class="btn" data-guardartoken="1">Guardar</button>
         <button class="btn sec" data-probar="1">Probar y crear hojas</button>
       </div>
     </div>
+
     <div class="card">
       <h2>Cómo funciona</h2>
-      <p class="ayuda">
-        Los datos viven en una <b>Hoja de Google</b> en tu Drive (pestañas: productos, lista, movimientos).
-        Esta web solo los lee y escribe. Comparte la URL de Vercel con tu familia: todos ven lo mismo.
-      </p>
+      <p class="ayuda">Los datos viven en una <b>Hoja de Google</b> en tu Drive. Entran solo los correos autorizados
+      en la pestaña <b>usuarios</b>. La web no guarda contraseñas: usa tu cuenta de Google.</p>
     </div>`;
 }
 
-/* ---------- Acciones (delegadas) ---------- */
+/* ---------- Acciones ---------- */
 async function onClick(e) {
-  const t = e.target.closest('[data-toggle],[data-del],[data-limpiar],[data-stock],[data-alista],[data-delprod],[data-guardar],[data-probar]');
+  const t = e.target.closest('[data-toggle],[data-del],[data-limpiar],[data-stock],[data-alista],[data-delprod],[data-guardartoken],[data-probar],[data-logout],[data-ir]');
   if (!t) return;
 
-  // Ajustes
-  if (t.dataset.guardar !== undefined) {
-    cfg.guardar($('#inApi').value, $('#inToken').value);
-    localStorage.setItem('mc_quien', $('#inQuien').value.trim());
-    toast('Guardado', 'ok');
-    irA('lista'); cargar();
-    return;
+  if (t.dataset.ir) {
+    if (t.dataset.ir === 'login') { cfg.cerrarSesion(); state.usuario = null; }
+    return irA(t.dataset.ir);
+  }
+  if (t.dataset.logout !== undefined) {
+    try { await apiPost('logout'); } catch (e2) {}
+    cfg.cerrarSesion(); state.usuario = null;
+    toast('Sesión cerrada'); return irA('login');
+  }
+  if (t.dataset.guardartoken !== undefined) {
+    cfg.guardarToken($('#inToken').value.trim());
+    toast('Token guardado', 'ok'); return irA('lista');
   }
   if (t.dataset.probar !== undefined) {
-    cfg.guardar($('#inApi').value, $('#inToken').value);
-    localStorage.setItem('mc_quien', $('#inQuien').value.trim());
+    cfg.guardarToken($('#inToken').value.trim());
     try {
       const r = await apiPost('init');
       if (!r.ok) throw new Error(r.error || 'Error');
@@ -283,15 +344,10 @@ async function onClick(e) {
     return;
   }
 
-  // Lista
   if (t.dataset.toggle) return mutar('lista.toggle', { id: t.dataset.toggle, quien: quien() });
   if (t.dataset.del)    return mutar('lista.delete', { id: t.dataset.del });
   if (t.dataset.limpiar !== undefined) return mutar('lista.limpiar', {});
-
-  // Despensa
-  if (t.dataset.stock) {
-    return mutar('producto.stock', { id: t.dataset.stock, delta: num(t.dataset.delta), quien: quien() });
-  }
+  if (t.dataset.stock)  return mutar('producto.stock', { id: t.dataset.stock, delta: num(t.dataset.delta), quien: quien() });
   if (t.dataset.alista) {
     const p = state.productos.find(x => String(x.id) === String(t.dataset.alista));
     if (p) return mutar('lista.add', { producto: p.nombre, cantidad: 1, unidad: p.unidad, quien: quien() });
@@ -306,7 +362,6 @@ async function onSubmit(e) {
   if (!form) return;
   e.preventDefault();
   const datos = Object.fromEntries(new FormData(form).entries());
-
   if (form.dataset.form === 'lista') {
     if (!datos.producto.trim()) return;
     form.reset();
@@ -317,19 +372,17 @@ async function onSubmit(e) {
   }
 }
 
-// Envía una mutación, recarga y refresca la vista.
 async function mutar(action, data) {
-  if (!cfg.lista()) { irA('ajustes'); return; }
+  if (!cfg.session && !cfg.token) { irA('login'); return; }
   try {
     const r = await apiPost(action, data);
+    if (r && r.codigo === 'AUTH') { cfg.cerrarSesion(); state.usuario = null; irA('login'); return; }
     if (!r || !r.ok) throw new Error((r && r.error) || 'Error');
     await cargar();
-  } catch (e) {
-    toast(e.message, 'error');
-  }
+  } catch (e) { toast(e.message, 'error'); }
 }
 
-/* ---------- Filtro en vivo (despensa) ---------- */
+/* ---------- Filtro en vivo ---------- */
 document.addEventListener('input', (e) => {
   if (e.target.id === 'buscar') {
     state.filtro = e.target.value;
