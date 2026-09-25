@@ -179,7 +179,7 @@ async function cargar(manual) {
     aplicarDatos(r);
 
     // Si hay filas pegadas a mano en la Hoja sin id, la app los asigna.
-    if ((r.productos || []).some(p => !String(p.id || '').trim())) {
+    if (r.sinId > 0) {
       await apiPost('producto.saneamiento', {});
       const r2 = await apiGet('getAll');
       if (r2 && r2.ok) aplicarDatos(r2);
