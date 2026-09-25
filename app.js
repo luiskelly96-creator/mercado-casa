@@ -144,17 +144,19 @@ function vistaLogin() {
     </div>`;
 }
 
-let gsiListo = false;
+let gsiInited = false;
 function initGSI() {
-  if (gsiListo || !cfg.clientId || cfg.clientId.indexOf('PENDIENTE') === 0) return;
+  if (!cfg.clientId || cfg.clientId.indexOf('PENDIENTE') === 0) return;
   if (!(window.google && window.google.accounts && window.google.accounts.id)) {
     setTimeout(initGSI, 200); return;
   }
   try {
-    google.accounts.id.initialize({ client_id: cfg.clientId, callback: onCredential });
+    if (!gsiInited) {
+      google.accounts.id.initialize({ client_id: cfg.clientId, callback: onCredential });
+      gsiInited = true;
+    }
     const el = document.getElementById('gbtn');
     if (el) google.accounts.id.renderButton(el, { theme: 'filled_blue', size: 'large', width: 260, text: 'signin_with', locale: 'es' });
-    gsiListo = true;
   } catch (e) { setTimeout(initGSI, 400); }
 }
 
