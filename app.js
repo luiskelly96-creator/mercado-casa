@@ -46,7 +46,7 @@ const quien = () => state.usuario ? (state.usuario.nombre || state.usuario.email
 const opt = (v, sel) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(v)}</option>`;
 const normalizarProducto = p => ({ id: p.id, nombre: p.nombre || '', categoria: p.categoria || '', ubicacion: p.ubicacion || '', descripcion: p.descripcion || '', disponible: !(String(p.disponible).toLowerCase() === 'false') });
 const normalizarContacto = c => ({ id: c.id, nombre: c.nombre || '', indicativo: c.indicativo || '', numero: c.numero || '', categoria: c.categoria || '', descripcion: c.descripcion || '' });
-const normalizarLista = i => ({ id: i.id, producto: i.producto || '', estado: i.estado === 'comprado' ? 'comprado' : 'pendiente', quien: i.quien || '' });
+const normalizarLista = i => ({ id: i.id, producto: i.producto || '', estado: i.estado === 'comprado' ? 'comprado' : 'pendiente', quien: i.quien || '', nota: i.nota || '' });
 const igualProd = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 
 const PAISES = ['+57', '+1', '+52', '+54', '+56', '+51', '+58', '+593', '+591', '+595', '+598', '+507', '+506', '+502', '+503', '+504', '+505', '+53', '+1809', '+34'];
@@ -305,7 +305,11 @@ function vistaLista() {
   const item = i => `
     <div class="item ${i.estado === 'comprado' ? 'comprado' : ''}">
       <button class="check ${i.estado === 'comprado' ? 'on' : ''}" data-togglalista="${esc(i.id)}">${i.estado === 'comprado' ? '✓' : ''}</button>
-      <div class="info"><div class="nombre">${esc(i.producto)}</div>${i.quien ? `<div class="meta">${esc(i.quien)}</div>` : ''}</div>
+      <div class="info">
+        <div class="nombre">${esc(i.producto)}</div>
+        ${i.nota ? `<div class="meta reco"><b>Recomendación:</b> ${esc(i.nota)}</div>` : ''}
+        ${i.quien ? `<div class="meta">${esc(i.quien)}</div>` : ''}
+      </div>
       <button class="btn sec mini" data-dellista="${esc(i.id)}">✕</button>
     </div>`;
 
@@ -481,13 +485,17 @@ function modalImportar() {
       </div>
     </form>`);
 }
-
-function modalPregunta(titulo, texto, si, onSi) {  abrirModal(titulo, `<p class="ayuda">${esc(texto)}</p>
+function modalSinExistencia(nombre) {
+  state._pendiente = nombre;
+  abrirModal('Sin existencia', `
+    <p class="ayuda">¿Llevar "<b>${esc(nombre)}</b>" a la lista de mercado?</p>
+    <label class="campo">¿Algo a tener en cuenta para la compra? (opcional)</label>
+    <input id="notaCompra" placeholder="Ej: marca, tamaño, dónde comprarlo" autocomplete="off">
     <div class="fila" style="margin-top:16px">
-      <button class="btn" data-preguntasi="1">${esc(si)}</button>
+      <button class="btn" data-preguntasi="1">Sí, a la lista</button>
       <button class="btn sec" data-cerrarmodal="1">No</button>
     </div>`);
-  state._onSi = onSi;
+  setTimeout(() => { const el = document.getElementById('notaCompra'); if (el) el.focus(); }, 60);
 }
 
 /* ================= EVENTOS ================= */
@@ -495,8 +503,16 @@ function onClick(e) {
   const t = e.target.closest('[data-cerrarmodal],[data-ir],[data-logout],[data-guardartoken],[data-probar],[data-nuevoprod],[data-importar],[data-editprod],[data-disp],[data-delprod],[data-togglefiltros],[data-limpiafiltros],[data-togglalista],[data-dellista],[data-limpiarlista],[data-nuevocontacto],[data-editcon],[data-delcon],[data-opadd],[data-oprename],[data-opdel],[data-preguntasi]');
   if (!t) return;
 
-  if (t.dataset.cerrarmodal !== undefined) { state._onSi = null; return cerrarModal(); }
-  if (t.dataset.preguntasi !== undefined) { const fn = state._onSi; state._onSi = null; cerrarModal(); if (fn) fn(); return; }
+  if (t.dataset.cerrarmodal !== undefined) { state._pendiente = null; return cerrarModal(); }
+  if (t.dataset.preguntasi !== undefined) {
+    const el = document.getElementById('notaCompra');
+    const nota = el ? el.value.trim() : '';
+    const nombre = state._pendiente;
+    state._pendiente = null;
+    cerrarModal();
+    if (nombre) agregarALista(nombre, nota);
+    return;
+  }
   if (t.dataset.ir) { if (t.dataset.ir === 'login') { cfg.cerrarSesion(); state.usuario = null; } return irA(t.dataset.ir); }
   if (t.dataset.logout !== undefined) { encolar('logout', {}); cfg.cerrarSesion(); state.usuario = null; toast('Sesión cerrada'); return irA('login'); }
   if (t.dataset.guardartoken !== undefined) { cfg.guardarToken($('#inToken').value.trim()); toast('Token guardado', 'ok'); return; }
@@ -554,7 +570,7 @@ function cambiarDisponible(id) {
   encolar('producto.disponible', () => ({ id, disponible: p.disponible, quien: quien() }))
     .then(res => { if (!res.ok) { p.disponible = previo; render(); } });
   if (!p.disponible) {
-    modalPregunta('Sin existencia', '¿Llevar "' + p.nombre + '" a la lista de mercado?', 'Sí, a la lista', () => agregarALista(p.nombre));
+    modalSinExistencia(p.nombre);
   }
 }
 
@@ -610,13 +626,20 @@ function eliminarProducto(id) {  state.productos = state.productos.filter(x => S
   encolar('producto.delete', () => ({ id }));
 }
 
-function agregarALista(nombre) {
-  if (state.lista.some(i => i.estado !== 'comprado' && igualProd(i.producto, nombre))) { toast('Ya está en la lista'); return; }
+function agregarALista(nombre, nota) {
+  nota = (nota || '').trim();
+  const existente = state.lista.find(i => i.estado !== 'comprado' && igualProd(i.producto, nombre));
+  if (existente) {
+    if (nota) existente.nota = nota;
+    if (state.vista === 'lista') render(); else guardarCache();
+    encolar('lista.add', () => ({ producto: nombre, quien: quien(), nota: nota }));
+    return;
+  }
   const tmp = 'tmp-' + Date.now();
-  const item = { id: tmp, producto: nombre, estado: 'pendiente', quien: quien() };
+  const item = { id: tmp, producto: nombre, estado: 'pendiente', quien: quien(), nota: nota };
   state.lista.push(item);
   if (state.vista === 'lista') render(); else guardarCache();
-  encolar('lista.add', () => ({ producto: nombre, quien: quien() }))
+  encolar('lista.add', () => ({ producto: nombre, quien: quien(), nota: nota }))
     .then(res => { if (res.ok && res.r && res.r.id) item.id = res.r.id; });
 }
 

@@ -92,6 +92,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--teal-600); 
 .item .info { flex: 1; min-width: 0; }
 .item .nombre { font-weight: 600; }
 .item .meta { font-size: .8rem; color: var(--muted); }
+.item .meta.reco { color: var(--teal); margin-top: 2px; }
 .item.comprado .nombre { text-decoration: line-through; color: var(--muted); }
 
 /* Agrupación por categoría en la lista */
