@@ -1,7 +1,7 @@
 {
-  "name": "Mercado Casa",
-  "short_name": "Mercado",
-  "description": "Inventario de despensa y lista de mercado compartida.",
+  "name": "Mi Casa",
+  "short_name": "Mi Casa",
+  "description": "Gestión de la casa: despensa, lista de mercado y contactos.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

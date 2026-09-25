@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0f766e">
-  <meta name="description" content="Inventario de despensa y lista de mercado compartida.">
-  <title>Mercado Casa</title>
+  <meta name="description" content="Gestión de la casa: despensa, lista de mercado y contactos.">
+  <title>Mi Casa</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg">
   <link rel="apple-touch-icon" href="icon.svg">
@@ -14,8 +14,8 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <span class="logo" aria-hidden="true">🛒</span>
-      <h1>Mercado Casa</h1>
+      <span class="logo" aria-hidden="true">🏠</span>
+      <h1>Mi Casa</h1>
     </div>
     <button id="btnSync" class="icon-btn" title="Sincronizar" aria-label="Sincronizar">⟳</button>
   </header>
@@ -23,11 +23,13 @@
   <main id="vista" class="vista"></main>
 
   <nav class="tabbar">
-    <button class="tab" data-vista="lista">📝<span>Lista</span></button>
     <button class="tab" data-vista="despensa">📦<span>Despensa</span></button>
+    <button class="tab" data-vista="lista">📝<span>Lista</span></button>
+    <button class="tab" data-vista="contactos">👥<span>Contactos</span></button>
     <button class="tab" data-vista="ajustes">⚙️<span>Ajustes</span></button>
   </nav>
 
+  <div id="modal"></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="https://accounts.google.com/gsi/client" async defer></script>
