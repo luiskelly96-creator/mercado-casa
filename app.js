@@ -263,6 +263,30 @@ function vistaDespensa() {
 }
 
 /* ================= MÓDULO: LISTA ================= */
+function categoriaDe(nombre) {
+  const p = state.productos.find(x => igualProd(x.nombre, nombre));
+  return (p && p.categoria) ? p.categoria : 'Sin categoría';
+}
+function agruparPorCategoria(items) {
+  const orden = state.categorias;
+  const grupos = new Map();
+  items.forEach(i => {
+    const c = categoriaDe(i.producto);
+    if (!grupos.has(c)) grupos.set(c, []);
+    grupos.get(c).push(i);
+  });
+  const claves = Array.from(grupos.keys()).sort((a, b) => {
+    if (a === 'Sin categoría') return 1;
+    if (b === 'Sin categoría') return -1;
+    const ia = orden.indexOf(a), ib = orden.indexOf(b);
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
+  return claves.map(c => ({ categoria: c, items: grupos.get(c) }));
+}
+
 function vistaLista() {
   const pend = state.lista.filter(i => i.estado !== 'comprado');
   const comp = state.lista.filter(i => i.estado === 'comprado');
@@ -277,7 +301,11 @@ function vistaLista() {
     <div class="mod-head"><h2>Lista de mercado <span class="cont">${pend.length}</span></h2></div>
     <div class="card">
       <h2>Por comprar</h2>
-      ${pend.length ? pend.map(item).join('') : '<p class="vacio">Nada pendiente.</p>'}
+      ${pend.length ? agruparPorCategoria(pend).map(g => `
+        <div class="grupo">
+          <div class="grupo-titulo">${esc(g.categoria)} <span class="cont">${g.items.length}</span></div>
+          ${g.items.map(item).join('')}
+        </div>`).join('') : '<p class="vacio">Nada pendiente.</p>'}
       <p class="ayuda" style="margin-top:10px">Los ítems se agregan desde <b>Despensa</b> cuando marcas algo como “No disponible”.</p>
     </div>
     ${comp.length ? `

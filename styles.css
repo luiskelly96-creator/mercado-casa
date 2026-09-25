@@ -94,6 +94,12 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--teal-600); 
 .item .meta { font-size: .8rem; color: var(--muted); }
 .item.comprado .nombre { text-decoration: line-through; color: var(--muted); }
 
+/* Agrupación por categoría en la lista */
+.grupo { margin-top: 4px; }
+.grupo-titulo { display: flex; align-items: center; gap: 8px; font-size: .74rem; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--teal); margin: 14px 4px 2px; }
+.grupo:first-of-type .grupo-titulo { margin-top: 4px; }
+.grupo-titulo .cont { color: var(--muted); font-weight: 600; }
+
 .vacio { color: var(--muted); text-align: center; padding: 18px 8px; }
 
 /* Listas editables (Ajustes) */
