@@ -158,21 +158,32 @@ function render() {
 }
 
 /* ---------- Datos ---------- */
+function aplicarDatos(r) {
+  state.productos = (r.productos || []).map(normalizarProducto);
+  state.lista = (r.lista || []).map(normalizarLista);
+  state.contactos = (r.contactos || []).map(normalizarContacto);
+  state.categorias = (r.categorias || []).map(c => c.nombre).filter(Boolean);
+  state.ubicaciones = (r.ubicaciones || []).map(c => c.nombre).filter(Boolean);
+  state.catContactos = (r.catContactos || []).map(c => c.nombre).filter(Boolean);
+  state.usuario = r.usuario || { nombre: cfg.nombre, email: cfg.email };
+}
+
 async function cargar(manual) {
   if (!cfg.session && !cfg.token) { irA('login'); return; }
   if (manual) { document.body.classList.add('guardando'); }
   try {
-    const r = await apiGet('getAll');
+    let r = await apiGet('getAll');
     if (r && r.codigo === 'AUTH') { cfg.cerrarSesion(); state.usuario = null; return irA('login'); }
     if (!r || !r.ok) throw new Error((r && r.error) || 'Respuesta inválida');
     if (hayPendientes()) return; // no pisar cambios en curso
-    state.productos = (r.productos || []).map(normalizarProducto);
-    state.lista = (r.lista || []).map(normalizarLista);
-    state.contactos = (r.contactos || []).map(normalizarContacto);
-    state.categorias = (r.categorias || []).map(c => c.nombre).filter(Boolean);
-    state.ubicaciones = (r.ubicaciones || []).map(c => c.nombre).filter(Boolean);
-    state.catContactos = (r.catContactos || []).map(c => c.nombre).filter(Boolean);
-    state.usuario = r.usuario || { nombre: cfg.nombre, email: cfg.email };
+    aplicarDatos(r);
+
+    // Si hay filas pegadas a mano en la Hoja sin id, la app los asigna.
+    if ((r.productos || []).some(p => !String(p.id || '').trim())) {
+      await apiPost('producto.saneamiento', {});
+      const r2 = await apiGet('getAll');
+      if (r2 && r2.ok) aplicarDatos(r2);
+    }
     render();
   } catch (e) { toast('No se pudo conectar: ' + e.message, 'error'); }
   document.body.classList.remove('guardando');
