@@ -245,6 +245,7 @@ function vistaDespensa() {
       <h2>Despensa <span class="cont">${items.length}</span></h2>
       <div class="mod-acciones">
         <button class="btn sec mini ${state.filtrosProd ? 'on' : ''}" data-togglefiltros="prod">Filtros${activos ? ' (' + activos + ')' : ''}</button>
+        <button class="btn sec mini" data-importar="1">Importar</button>
         <button class="btn mini" data-nuevoprod="1">+ Nuevo</button>
       </div>
     </div>
@@ -456,8 +457,21 @@ function modalContacto(c) {
     </form>`);
 }
 
-function modalPregunta(titulo, texto, si, onSi) {
-  abrirModal(titulo, `<p class="ayuda">${esc(texto)}</p>
+function modalImportar() {
+  abrirModal('Importar productos', `
+    <form data-form="importar">
+      <p class="ayuda">Pega las filas copiadas de Excel o Google Sheets.<br>
+      Orden de columnas: <b>Nombre, Categoría, Ubicación, Descripción</b> (una fila por producto).<br>
+      Sirve tabulación, punto y coma o coma. Los que ya existan (mismo nombre) se saltan.</p>
+      <textarea name="texto" rows="10" placeholder="Arroz,Despensa y condimentos,Despensa,Arroz Diana 500g&#10;Leche,Lacteos,Nevera,"></textarea>
+      <div class="fila" style="margin-top:14px">
+        <button class="btn" type="submit">Importar</button>
+        <button class="btn sec" type="button" data-cerrarmodal="1">Cancelar</button>
+      </div>
+    </form>`);
+}
+
+function modalPregunta(titulo, texto, si, onSi) {  abrirModal(titulo, `<p class="ayuda">${esc(texto)}</p>
     <div class="fila" style="margin-top:16px">
       <button class="btn" data-preguntasi="1">${esc(si)}</button>
       <button class="btn sec" data-cerrarmodal="1">No</button>
@@ -467,7 +481,7 @@ function modalPregunta(titulo, texto, si, onSi) {
 
 /* ================= EVENTOS ================= */
 function onClick(e) {
-  const t = e.target.closest('[data-cerrarmodal],[data-ir],[data-logout],[data-guardartoken],[data-probar],[data-nuevoprod],[data-editprod],[data-disp],[data-delprod],[data-togglefiltros],[data-limpiafiltros],[data-togglalista],[data-dellista],[data-limpiarlista],[data-nuevocontacto],[data-editcon],[data-delcon],[data-opadd],[data-oprename],[data-opdel],[data-preguntasi]');
+  const t = e.target.closest('[data-cerrarmodal],[data-ir],[data-logout],[data-guardartoken],[data-probar],[data-nuevoprod],[data-importar],[data-editprod],[data-disp],[data-delprod],[data-togglefiltros],[data-limpiafiltros],[data-togglalista],[data-dellista],[data-limpiarlista],[data-nuevocontacto],[data-editcon],[data-delcon],[data-opadd],[data-oprename],[data-opdel],[data-preguntasi]');
   if (!t) return;
 
   if (t.dataset.cerrarmodal !== undefined) { state._onSi = null; return cerrarModal(); }
@@ -478,6 +492,7 @@ function onClick(e) {
   if (t.dataset.probar !== undefined) { cfg.guardarToken($('#inToken').value.trim()); encolar('init', {}).then(r => { if (r.ok) toast('Conexión OK, hojas listas', 'ok'); }); return; }
 
   if (t.dataset.nuevoprod !== undefined) return modalProducto(null);
+  if (t.dataset.importar !== undefined) return modalImportar();
   if (t.dataset.editprod !== undefined) { const p = state.productos.find(x => String(x.id) === String(t.dataset.editprod)); if (p) modalProducto(p); return; }
   if (t.dataset.disp !== undefined) return cambiarDisponible(t.dataset.disp);
   if (t.dataset.delprod !== undefined) return eliminarProducto(t.dataset.delprod);
@@ -505,6 +520,7 @@ function onSubmit(e) {
   const d = Object.fromEntries(new FormData(form).entries());
   if (form.dataset.form === 'producto') return guardarProducto(d);
   if (form.dataset.form === 'contacto') return guardarContacto(d);
+  if (form.dataset.form === 'importar') return importarProductos(d.texto);
 }
 
 function onInput(e) {
@@ -550,8 +566,35 @@ function guardarProducto(d) {
   }
 }
 
-function eliminarProducto(id) {
-  state.productos = state.productos.filter(x => String(x.id) !== String(id));
+function parseImportacion(texto) {
+  const lineas = String(texto || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (!lineas.length) return [];
+  const delim = lineas[0].includes('\t') ? '\t' : (lineas[0].includes(';') ? ';' : ',');
+  const out = [];
+  lineas.forEach((l, idx) => {
+    const c = l.split(delim).map(x => x.trim().replace(/^"|"$/g, ''));
+    if (idx === 0 && /^nombre$/i.test(c[0])) return; // encabezado
+    out.push({ nombre: c[0] || '', categoria: c[1] || '', ubicacion: c[2] || '', descripcion: c[3] || '' });
+  });
+  return out;
+}
+
+function importarProductos(texto) {
+  const items = parseImportacion(texto);
+  cerrarModal();
+  if (!items.length) { toast('No hay filas para importar', 'error'); return; }
+  document.body.classList.add('guardando');
+  encolar('producto.import', () => ({ items })).then(res => {
+    document.body.classList.remove('guardando');
+    if (res.ok && res.r) {
+      const r = res.r;
+      toast('Importados: ' + r.agregados + ' · ya existían: ' + r.repetidos + (r.invalidos ? ' · sin nombre: ' + r.invalidos : ''), 'ok');
+      cargar(true);
+    }
+  });
+}
+
+function eliminarProducto(id) {  state.productos = state.productos.filter(x => String(x.id) !== String(id));
   cerrarModal(); render();
   encolar('producto.delete', () => ({ id }));
 }
