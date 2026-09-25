@@ -45,7 +45,7 @@ function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ 
 const quien = () => state.usuario ? (state.usuario.nombre || state.usuario.email) : '';
 const opt = (v, sel) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(v)}</option>`;
 const normalizarProducto = p => ({ id: p.id, nombre: p.nombre || '', categoria: p.categoria || '', ubicacion: p.ubicacion || '', descripcion: p.descripcion || '', disponible: !(String(p.disponible).toLowerCase() === 'false') });
-const normalizarContacto = c => ({ id: c.id, nombre: c.nombre || '', indicativo: c.indicativo || '', numero: c.numero || '', categoria: c.categoria || '', descripcion: c.descripcion || '' });
+const normalizarContacto = c => ({ id: c.id, nombre: String(c.nombre || ''), indicativo: String(c.indicativo == null ? '' : c.indicativo).trim(), numero: String(c.numero == null ? '' : c.numero).trim(), categoria: c.categoria || '', descripcion: c.descripcion || '' });
 const normalizarLista = i => ({ id: i.id, producto: i.producto || '', estado: i.estado === 'comprado' ? 'comprado' : 'pendiente', quien: i.quien || '', nota: i.nota || '' });
 const igualProd = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 const enListaPendiente = (nombre) => state.lista.some(i => i.estado !== 'comprado' && igualProd(i.producto, nombre));
@@ -349,7 +349,11 @@ function vistaContactos() {
   items.sort((a, b) => a.nombre.localeCompare(b.nombre));
 
   const activos = (f.categoria ? 1 : 0) + (q ? 1 : 0);
-  const tel = c => (c.indicativo || '') + (c.numero || '');
+  const tel = c => {
+    let i = String(c.indicativo || '').trim();
+    if (i && i[0] !== '+') i = '+' + i.replace(/\D/g, '');
+    return i + String(c.numero || '').trim();
+  };
 
   const fila = c => `
     <div class="prod" data-editcon="${esc(c.id)}">
