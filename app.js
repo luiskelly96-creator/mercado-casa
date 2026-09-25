@@ -1,4 +1,4 @@
-// ===== Mi Casa — app.js (v3 · módulos) =====
+// ===== Mi Casa — app.js (v3.1 · cola + caché) =====
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -47,6 +47,7 @@ const opt = (v, sel) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''
 const normalizarProducto = p => ({ id: p.id, nombre: p.nombre || '', categoria: p.categoria || '', ubicacion: p.ubicacion || '', descripcion: p.descripcion || '', disponible: !(String(p.disponible).toLowerCase() === 'false') });
 const normalizarContacto = c => ({ id: c.id, nombre: c.nombre || '', indicativo: c.indicativo || '', numero: c.numero || '', categoria: c.categoria || '', descripcion: c.descripcion || '' });
 const normalizarLista = i => ({ id: i.id, producto: i.producto || '', estado: i.estado === 'comprado' ? 'comprado' : 'pendiente', quien: i.quien || '' });
+const igualProd = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 
 const PAISES = ['+57', '+1', '+52', '+54', '+56', '+51', '+58', '+593', '+591', '+595', '+598', '+507', '+506', '+502', '+503', '+504', '+505', '+53', '+1809', '+34'];
 
@@ -59,9 +60,68 @@ function toast(msg, tipo = '') {
   toastTimer = setTimeout(() => { el.className = 'toast'; }, 3000);
 }
 
+/* ---------- Caché local (carga instantánea) ---------- */
+function guardarCache() {
+  try {
+    localStorage.setItem('mc_cache', JSON.stringify({
+      productos: state.productos, lista: state.lista, contactos: state.contactos,
+      categorias: state.categorias, ubicaciones: state.ubicaciones, catContactos: state.catContactos
+    }));
+  } catch (e) {}
+}
+function leerCache() {
+  try {
+    const c = JSON.parse(localStorage.getItem('mc_cache') || 'null');
+    if (!c) return false;
+    state.productos = c.productos || [];
+    state.lista = c.lista || [];
+    state.contactos = c.contactos || [];
+    state.categorias = c.categorias || [];
+    state.ubicaciones = c.ubicaciones || [];
+    state.catContactos = c.catContactos || [];
+    return true;
+  } catch (e) { return false; }
+}
+
+/* ---------- Cola de escritura (no revierte, serializada) ---------- */
+const cola = [];
+let procesando = false;
+let pendientes = 0;
+
+function enqueue(tarea) {
+  return new Promise(resolve => {
+    cola.push({ tarea, resolve });
+    if (!procesando) procesar();
+  });
+}
+async function procesar() {
+  procesando = true;
+  while (cola.length) {
+    const item = cola.shift();
+    pendientes++; document.body.classList.add('guardando');
+    try { item.resolve({ ok: true, r: await item.tarea() }); }
+    catch (e) { toast(e.message, 'error'); item.resolve({ ok: false, error: e.message }); }
+    pendientes--; if (pendientes <= 0) document.body.classList.remove('guardando');
+  }
+  procesando = false;
+}
+// Encola una llamada al servidor (con 1 reintento por red). El id se lee al ejecutar.
+function encolar(action, dataFn) {
+  return enqueue(async () => {
+    const data = typeof dataFn === 'function' ? dataFn() : dataFn;
+    let r;
+    try { r = await apiPost(action, data); }
+    catch (e) { r = await apiPost(action, data); }
+    if (r && r.codigo === 'AUTH') { cfg.cerrarSesion(); state.usuario = null; irA('login'); throw new Error('Sesión expirada'); }
+    if (!r || !r.ok) throw new Error((r && r.error) || 'Error al guardar');
+    return r;
+  });
+}
+const hayPendientes = () => procesando || cola.length > 0;
+
 /* ---------- Arranque ---------- */
 function init() {
-  $('#btnSync').addEventListener('click', () => cargar());
+  $('#btnSync').addEventListener('click', () => cargar(true));
   $$('.tab').forEach(t => t.addEventListener('click', () => irA(t.dataset.vista)));
   document.addEventListener('click', onClick);
   document.addEventListener('submit', onSubmit);
@@ -69,8 +129,10 @@ function init() {
   document.addEventListener('change', onChange);
 
   if (!cfg.api) { toast('Falta configurar la API', 'error'); return; }
-  if (!cfg.session && !cfg.token) { irA('login'); }
-  else { irA('despensa'); cargar(); }
+  if (!cfg.session && !cfg.token) { irA('login'); return; }
+  leerCache();
+  irA('despensa');
+  cargar();
 }
 
 function irA(vista) {
@@ -91,16 +153,19 @@ function render() {
   else if (state.vista === 'lista') v.innerHTML = vistaLista();
   else if (state.vista === 'contactos') v.innerHTML = vistaContactos();
   else v.innerHTML = vistaAjustes();
+  guardarCache();
   if (foco && foco.id) { const el = document.getElementById(foco.id); if (el) { el.focus(); try { el.setSelectionRange(foco.pos, foco.pos); } catch (e) {} } }
 }
 
 /* ---------- Datos ---------- */
-async function cargar() {
+async function cargar(manual) {
   if (!cfg.session && !cfg.token) { irA('login'); return; }
+  if (manual) { document.body.classList.add('guardando'); }
   try {
     const r = await apiGet('getAll');
     if (r && r.codigo === 'AUTH') { cfg.cerrarSesion(); state.usuario = null; return irA('login'); }
     if (!r || !r.ok) throw new Error((r && r.error) || 'Respuesta inválida');
+    if (hayPendientes()) return; // no pisar cambios en curso
     state.productos = (r.productos || []).map(normalizarProducto);
     state.lista = (r.lista || []).map(normalizarLista);
     state.contactos = (r.contactos || []).map(normalizarContacto);
@@ -108,8 +173,9 @@ async function cargar() {
     state.ubicaciones = (r.ubicaciones || []).map(c => c.nombre).filter(Boolean);
     state.catContactos = (r.catContactos || []).map(c => c.nombre).filter(Boolean);
     state.usuario = r.usuario || { nombre: cfg.nombre, email: cfg.email };
+    render();
   } catch (e) { toast('No se pudo conectar: ' + e.message, 'error'); }
-  render();
+  document.body.classList.remove('guardando');
 }
 
 /* ================= LOGIN ================= */
@@ -169,7 +235,7 @@ function vistaDespensa() {
           ${p.categoria ? `<span class="chip">${esc(p.categoria)}</span>` : ''}
           ${p.ubicacion ? `<span class="chip ghost">${esc(p.ubicacion)}</span>` : ''}
         </div>
-        ${p.descripcion ? `<div class="prod-desc">${esc(p.descripcion)}</div>` : ''}
+        ${p.descripcion ? `<div class="prod-desc"><b>Descripción:</b> ${esc(p.descripcion)}</div>` : ''}
       </div>
       <button class="estado ${p.disponible ? 'ok' : 'no'}" data-disp="${esc(p.id)}">${p.disponible ? 'Disponible' : 'No disponible'}</button>
     </div>`;
@@ -203,10 +269,7 @@ function vistaLista() {
   const item = i => `
     <div class="item ${i.estado === 'comprado' ? 'comprado' : ''}">
       <button class="check ${i.estado === 'comprado' ? 'on' : ''}" data-togglalista="${esc(i.id)}">${i.estado === 'comprado' ? '✓' : ''}</button>
-      <div class="info">
-        <div class="nombre">${esc(i.producto)}</div>
-        ${i.quien ? `<div class="meta">${esc(i.quien)}</div>` : ''}
-      </div>
+      <div class="info"><div class="nombre">${esc(i.producto)}</div>${i.quien ? `<div class="meta">${esc(i.quien)}</div>` : ''}</div>
       <button class="btn sec mini" data-dellista="${esc(i.id)}">✕</button>
     </div>`;
 
@@ -243,9 +306,9 @@ function vistaContactos() {
       <div class="prod-main">
         <div class="prod-nombre">${esc(c.nombre)}</div>
         <div class="prod-chips">${c.categoria ? `<span class="chip">${esc(c.categoria)}</span>` : ''}</div>
-        ${c.descripcion ? `<div class="prod-desc">${esc(c.descripcion)}</div>` : ''}
+        ${c.descripcion ? `<div class="prod-desc"><b>Descripción:</b> ${esc(c.descripcion)}</div>` : ''}
       </div>
-      ${c.numero ? `<a class="btn mini" href="tel:${esc(tel(c).replace(/\s/g, ''))}" data-nollenar>📞 ${esc(tel(c))}</a>` : ''}
+      ${c.numero ? `<a class="btn mini" href="tel:${esc(tel(c).replace(/\s/g, ''))}">📞 ${esc(tel(c))}</a>` : ''}
     </div>`;
 
   return `
@@ -256,14 +319,12 @@ function vistaContactos() {
         <button class="btn mini" data-nuevocontacto="1">+ Nuevo</button>
       </div>
     </div>
-
     ${state.filtrosCon ? `
     <div class="filtros">
       <input id="fqC" placeholder="Buscar por nombre o número" value="${esc(state.fCon.q)}">
       <select id="fcC">${opt('', 'Categoría')}${state.catContactos.map(c => opt(c, state.fCon.categoria)).join('')}</select>
       ${activos ? '<button class="btn sec mini" data-limpiafiltros="con">Limpiar</button>' : ''}
     </div>` : ''}
-
     <div class="lista">
       ${items.length ? items.map(fila).join('') : '<p class="vacio">No hay contactos. Crea uno con “+ Nuevo”.</p>'}
     </div>`;
@@ -299,11 +360,9 @@ function vistaAjustes() {
         <button class="btn danger" data-logout="1" style="margin-top:12px">Cerrar sesión</button>
       ` : `<p class="ayuda">No has iniciado sesión.</p><button class="btn" data-ir="login">Iniciar sesión con Google</button>`}
     </div>
-
     ${bloque('Categorías', 'categorias', state.categorias)}
     ${bloque('Ubicaciones', 'ubicaciones', state.ubicaciones)}
     ${bloque('Categorías de contactos', 'catContactos', state.catContactos)}
-
     <div class="card">
       <h2>Avanzado (dueño)</h2>
       <p class="ayuda">Solo mantenimiento.</p>
@@ -386,13 +445,9 @@ function onClick(e) {
   if (t.dataset.cerrarmodal !== undefined) { state._onSi = null; return cerrarModal(); }
   if (t.dataset.preguntasi !== undefined) { const fn = state._onSi; state._onSi = null; cerrarModal(); if (fn) fn(); return; }
   if (t.dataset.ir) { if (t.dataset.ir === 'login') { cfg.cerrarSesion(); state.usuario = null; } return irA(t.dataset.ir); }
-  if (t.dataset.logout !== undefined) { apiPost('logout').catch(() => {}); cfg.cerrarSesion(); state.usuario = null; toast('Sesión cerrada'); return irA('login'); }
+  if (t.dataset.logout !== undefined) { encolar('logout', {}); cfg.cerrarSesion(); state.usuario = null; toast('Sesión cerrada'); return irA('login'); }
   if (t.dataset.guardartoken !== undefined) { cfg.guardarToken($('#inToken').value.trim()); toast('Token guardado', 'ok'); return; }
-  if (t.dataset.probar !== undefined) {
-    cfg.guardarToken($('#inToken').value.trim());
-    apiPost('init').then(r => { if (!r.ok) throw new Error(r.error); toast('Conexión OK, hojas listas', 'ok'); });
-    return;
-  }
+  if (t.dataset.probar !== undefined) { cfg.guardarToken($('#inToken').value.trim()); encolar('init', {}).then(r => { if (r.ok) toast('Conexión OK, hojas listas', 'ok'); }); return; }
 
   if (t.dataset.nuevoprod !== undefined) return modalProducto(null);
   if (t.dataset.editprod !== undefined) { const p = state.productos.find(x => String(x.id) === String(t.dataset.editprod)); if (p) modalProducto(p); return; }
@@ -434,125 +489,133 @@ function onChange(e) {
   if (e.target.id === 'fcC') { state.fCon.categoria = e.target.value; return render(); }
 }
 
-/* ================= ACCIONES (optimistas) ================= */
-async function sincronizar(action, data) {
-  try {
-    const r = await apiPost(action, data);
-    if (r && r.codigo === 'AUTH') { cfg.cerrarSesion(); state.usuario = null; irA('login'); return null; }
-    if (!r || !r.ok) throw new Error((r && r.error) || 'Error');
-    return r;
-  } catch (err) { toast(err.message, 'error'); cargar(); return null; }
-}
-
-async function guardarProducto(d) {
-  if (!d.nombre.trim()) return;
-  const edit = d.id;
-  cerrarModal();
-  if (edit) {
-    const p = state.productos.find(x => String(x.id) === String(edit));
-    if (p) { Object.assign(p, { nombre: d.nombre.trim(), categoria: d.categoria, ubicacion: d.ubicacion, descripcion: d.descripcion.trim() }); render(); }
-    await sincronizar('producto.update', { id: edit, nombre: d.nombre.trim(), categoria: d.categoria, ubicacion: d.ubicacion, descripcion: d.descripcion.trim() });
-  } else {
-    const tmp = 'tmp-' + Date.now();
-    state.productos.push({ id: tmp, nombre: d.nombre.trim(), categoria: d.categoria, ubicacion: d.ubicacion, descripcion: d.descripcion.trim(), disponible: true });
-    render();
-    const r = await sincronizar('producto.add', { nombre: d.nombre.trim(), categoria: d.categoria, ubicacion: d.ubicacion, descripcion: d.descripcion.trim(), quien: quien() });
-    if (r && r.id) { const p = state.productos.find(x => x.id === tmp); if (p) p.id = r.id; }
-  }
-}
-
-async function cambiarDisponible(id) {
+/* ================= ACCIONES (optimistas, en cola) ================= */
+function cambiarDisponible(id) {
   const p = state.productos.find(x => String(x.id) === String(id));
   if (!p) return;
   const previo = p.disponible;
-  p.disponible = !previo; render();
-  const r = await sincronizar('producto.disponible', { id, disponible: p.disponible, quien: quien() });
-  if (!r) return;
+  p.disponible = !previo;
+  render(); // el cambio y la pregunta salen de inmediato
+  encolar('producto.disponible', () => ({ id, disponible: p.disponible, quien: quien() }))
+    .then(res => { if (!res.ok) { p.disponible = previo; render(); } });
   if (!p.disponible) {
     modalPregunta('Sin existencia', '¿Llevar "' + p.nombre + '" a la lista de mercado?', 'Sí, a la lista', () => agregarALista(p.nombre));
   }
 }
 
-async function eliminarProducto(id) {
-  await sincronizar('producto.delete', { id });
+function guardarProducto(d) {
+  if (!d.nombre.trim()) return;
+  const edit = d.id;
+  const base = { nombre: d.nombre.trim(), categoria: d.categoria, ubicacion: d.ubicacion, descripcion: d.descripcion.trim() };
+  cerrarModal();
+  if (edit) {
+    const p = state.productos.find(x => String(x.id) === String(edit));
+    if (p) Object.assign(p, base);
+    render();
+    encolar('producto.update', () => Object.assign({ id: edit }, base));
+  } else {
+    const tmp = 'tmp-' + Date.now();
+    const nuevo = Object.assign({ id: tmp, disponible: true }, base);
+    state.productos.push(nuevo); render();
+    encolar('producto.add', () => Object.assign({}, base, { quien: quien() }))
+      .then(res => { if (res.ok && res.r && res.r.id) nuevo.id = res.r.id; });
+  }
+}
+
+function eliminarProducto(id) {
   state.productos = state.productos.filter(x => String(x.id) !== String(id));
   cerrarModal(); render();
+  encolar('producto.delete', () => ({ id }));
 }
 
-async function agregarALista(nombre) {
-  if (state.lista.some(i => i.estado !== 'comprado' && i.producto.toLowerCase() === nombre.toLowerCase())) { toast('Ya está en la lista'); return; }
+function agregarALista(nombre) {
+  if (state.lista.some(i => i.estado !== 'comprado' && igualProd(i.producto, nombre))) { toast('Ya está en la lista'); return; }
   const tmp = 'tmp-' + Date.now();
-  state.lista.push({ id: tmp, producto: nombre, estado: 'pendiente', quien: quien() });
-  if (state.vista === 'lista') render();
-  const r = await sincronizar('lista.add', { producto: nombre, quien: quien() });
-  if (r && r.id) { const i = state.lista.find(x => x.id === tmp); if (i) i.id = r.id; }
+  const item = { id: tmp, producto: nombre, estado: 'pendiente', quien: quien() };
+  state.lista.push(item);
+  if (state.vista === 'lista') render(); else guardarCache();
+  encolar('lista.add', () => ({ producto: nombre, quien: quien() }))
+    .then(res => { if (res.ok && res.r && res.r.id) item.id = res.r.id; });
 }
 
-async function togglearLista(id) {
+function togglearLista(id) {
   const i = state.lista.find(x => String(x.id) === String(id));
   if (!i) return;
-  const previo = i.estado;
-  i.estado = previo === 'comprado' ? 'pendiente' : 'comprado'; render();
-  await sincronizar('lista.toggle', { id, quien: quien() });
+  i.estado = i.estado === 'comprado' ? 'pendiente' : 'comprado';
+  if (i.estado === 'comprado') {
+    const p = state.productos.find(x => igualProd(x.nombre, i.producto));
+    if (p) p.disponible = true;
+  }
+  render();
+  encolar('lista.toggle', () => ({ id: i.id, quien: quien() }))
+    .then(res => { if (!res.ok) { i.estado = i.estado === 'comprado' ? 'pendiente' : 'comprado'; render(); } });
 }
 
-async function eliminarDeLista(id) {
+function eliminarDeLista(id) {
   state.lista = state.lista.filter(x => String(x.id) !== String(id)); render();
-  await sincronizar('lista.delete', { id });
+  encolar('lista.delete', () => ({ id }));
 }
 
-async function limpiarLista() {
-  state.lista = state.lista.filter(i => i.estado !== 'comprado'); render();
-  await sincronizar('lista.limpiar', {});
+function limpiarLista() {
+  // Marca como disponibles los productos comprados y saca los comprados de la lista.
+  state.lista.filter(i => i.estado === 'comprado').forEach(i => {
+    const p = state.productos.find(x => igualProd(x.nombre, i.producto));
+    if (p) p.disponible = true;
+  });
+  state.lista = state.lista.filter(i => i.estado !== 'comprado');
+  render();
+  encolar('lista.limpiar', () => ({}));
 }
 
-async function guardarContacto(d) {
+function guardarContacto(d) {
   if (!d.nombre.trim()) return;
   const edit = d.id;
   const base = { nombre: d.nombre.trim(), indicativo: d.indicativo, numero: d.numero.trim(), categoria: d.categoria, descripcion: d.descripcion.trim() };
   cerrarModal();
   if (edit) {
     const c = state.contactos.find(x => String(x.id) === String(edit));
-    if (c) { Object.assign(c, base); render(); }
-    await sincronizar('contacto.update', Object.assign({ id: edit }, base));
+    if (c) Object.assign(c, base);
+    render();
+    encolar('contacto.update', () => Object.assign({ id: edit }, base));
   } else {
     const tmp = 'tmp-' + Date.now();
-    state.contactos.push(Object.assign({ id: tmp }, base)); render();
-    const r = await sincronizar('contacto.add', Object.assign({}, base, { quien: quien() }));
-    if (r && r.id) { const c = state.contactos.find(x => x.id === tmp); if (c) c.id = r.id; }
+    const nuevo = Object.assign({ id: tmp }, base);
+    state.contactos.push(nuevo); render();
+    encolar('contacto.add', () => Object.assign({}, base, { quien: quien() }))
+      .then(res => { if (res.ok && res.r && res.r.id) nuevo.id = res.r.id; });
   }
 }
 
-async function eliminarContacto(id) {
+function eliminarContacto(id) {
   state.contactos = state.contactos.filter(x => String(x.id) !== String(id));
   cerrarModal(); render();
-  await sincronizar('contacto.delete', { id });
+  encolar('contacto.delete', () => ({ id }));
 }
 
 /* ---------- Listas editables (Ajustes) ---------- */
 function listaDe(tipo) { return tipo === 'categorias' ? state.categorias : tipo === 'ubicaciones' ? state.ubicaciones : state.catContactos; }
 function setLista(tipo, arr) { if (tipo === 'categorias') state.categorias = arr; else if (tipo === 'ubicaciones') state.ubicaciones = arr; else state.catContactos = arr; }
 
-async function opAdd(tipo) {
+function opAdd(tipo) {
   const el = document.getElementById('nuevo-' + tipo);
   const nombre = (el ? el.value : '').trim();
   if (!nombre) return;
   if (listaDe(tipo).some(x => x.toLowerCase() === nombre.toLowerCase())) { toast('Ya existe'); return; }
   setLista(tipo, listaDe(tipo).concat(nombre).sort((a, b) => a.localeCompare(b))); render();
-  await sincronizar('opcion.add', { tipo, nombre });
+  encolar('opcion.add', () => ({ tipo, nombre }));
 }
 
-async function opRename(tipo, nombre) {
+function opRename(tipo, nombre) {
   const nuevo = prompt('Nuevo nombre:', nombre);
   if (!nuevo || !nuevo.trim() || nuevo.trim() === nombre) return;
   setLista(tipo, listaDe(tipo).map(x => x === nombre ? nuevo.trim() : x)); render();
-  await sincronizar('opcion.rename', { tipo, nombre, nuevo: nuevo.trim() });
+  encolar('opcion.rename', () => ({ tipo, nombre, nuevo: nuevo.trim() }));
 }
 
-async function opDelete(tipo, nombre) {
-  const r = await sincronizar('opcion.delete', { tipo, nombre });
-  if (!r) return;
-  setLista(tipo, listaDe(tipo).filter(x => x !== nombre)); render();
+function opDelete(tipo, nombre) {
+  encolar('opcion.delete', () => ({ tipo, nombre })).then(res => {
+    if (res.ok) { setLista(tipo, listaDe(tipo).filter(x => x !== nombre)); render(); }
+  });
 }
 
 /* ---------- PWA ---------- */

@@ -129,3 +129,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--teal-600); 
 .logo-grande { font-size: 2.6rem; }
 .gbtn { display: flex; justify-content: center; margin-top: 14px; }
 label.campo { display: block; font-size: .82rem; color: var(--muted); margin: 10px 0 4px; }
+
+/* Indicador de guardado: gira el botón ⟳ mientras hay escrituras pendientes */
+@keyframes girar { to { transform: rotate(360deg); } }
+body.guardando #btnSync { animation: girar 1s linear infinite; opacity: .8; }
