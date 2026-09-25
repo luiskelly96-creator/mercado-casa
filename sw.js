@@ -1,5 +1,5 @@
 // Service worker mínimo: red primero, caché como respaldo (para que funcione sin señal).
-const CACHE = 'mi-casa-v9';
+const CACHE = 'mi-casa-v10';
 const SHELL = ['./', './index.html', './styles.css', './app.js', './config.js', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', (e) => {

@@ -48,6 +48,7 @@ const normalizarProducto = p => ({ id: p.id, nombre: p.nombre || '', categoria: 
 const normalizarContacto = c => ({ id: c.id, nombre: c.nombre || '', indicativo: c.indicativo || '', numero: c.numero || '', categoria: c.categoria || '', descripcion: c.descripcion || '' });
 const normalizarLista = i => ({ id: i.id, producto: i.producto || '', estado: i.estado === 'comprado' ? 'comprado' : 'pendiente', quien: i.quien || '', nota: i.nota || '' });
 const igualProd = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+const enListaPendiente = (nombre) => state.lista.some(i => i.estado !== 'comprado' && igualProd(i.producto, nombre));
 
 const PAISES = ['+57', '+1', '+52', '+54', '+56', '+51', '+58', '+593', '+591', '+595', '+598', '+507', '+506', '+502', '+503', '+504', '+505', '+53', '+1809', '+34'];
 
@@ -248,7 +249,12 @@ function vistaDespensa() {
         </div>
         ${p.descripcion ? `<div class="prod-desc"><b>Descripción:</b> ${esc(p.descripcion)}</div>` : ''}
       </div>
-      <button class="estado ${p.disponible ? 'ok' : 'no'}" data-disp="${esc(p.id)}">${p.disponible ? 'Disponible' : 'No disponible'}</button>
+      <div class="prod-lado">
+        <button class="estado ${p.disponible ? 'ok' : 'no'}" data-disp="${esc(p.id)}">${p.disponible ? 'Disponible' : 'No disponible'}</button>
+        ${!p.disponible ? (enListaPendiente(p.nombre)
+          ? '<span class="chip enLista">En lista</span>'
+          : `<button class="btn sec mini" data-alista="${esc(p.id)}">＋ Lista</button>`) : ''}
+      </div>
     </div>`;
 
   return `
@@ -485,32 +491,47 @@ function modalImportar() {
       </div>
     </form>`);
 }
-function modalSinExistencia(nombre) {
+function modalSinExistencia(nombre, modo, id) {
   state._pendiente = nombre;
+  state._modo = modo || 'cambio';
+  state._pendienteId = id || null;
   abrirModal('Sin existencia', `
     <p class="ayuda">¿Llevar "<b>${esc(nombre)}</b>" a la lista de mercado?</p>
     <label class="campo">¿Algo a tener en cuenta para la compra? (opcional)</label>
     <input id="notaCompra" placeholder="Ej: marca, tamaño, dónde comprarlo" autocomplete="off">
     <div class="fila" style="margin-top:16px">
       <button class="btn" data-preguntasi="1">Sí, a la lista</button>
-      <button class="btn sec" data-cerrarmodal="1">No</button>
+      <button class="btn sec" data-nolista="1">No</button>
     </div>`);
   setTimeout(() => { const el = document.getElementById('notaCompra'); if (el) el.focus(); }, 60);
 }
 
+function limpiarPendiente() { state._pendiente = null; state._modo = null; state._pendienteId = null; }
+function tomarPendiente() { const r = { nombre: state._pendiente, modo: state._modo, id: state._pendienteId }; limpiarPendiente(); return r; }
+function aplicarNoDisponible(id) {
+  const p = state.productos.find(x => String(x.id) === String(id));
+  if (p) marcarDisponible(p, false);
+}
+
 /* ================= EVENTOS ================= */
 function onClick(e) {
-  const t = e.target.closest('[data-cerrarmodal],[data-ir],[data-logout],[data-guardartoken],[data-probar],[data-nuevoprod],[data-importar],[data-editprod],[data-disp],[data-delprod],[data-togglefiltros],[data-limpiafiltros],[data-togglalista],[data-dellista],[data-limpiarlista],[data-nuevocontacto],[data-editcon],[data-delcon],[data-opadd],[data-oprename],[data-opdel],[data-preguntasi]');
+  const t = e.target.closest('[data-cerrarmodal],[data-ir],[data-logout],[data-guardartoken],[data-probar],[data-nuevoprod],[data-importar],[data-editprod],[data-disp],[data-alista],[data-delprod],[data-togglefiltros],[data-limpiafiltros],[data-togglalista],[data-dellista],[data-limpiarlista],[data-nuevocontacto],[data-editcon],[data-delcon],[data-opadd],[data-oprename],[data-opdel],[data-preguntasi],[data-nolista]');
   if (!t) return;
 
-  if (t.dataset.cerrarmodal !== undefined) { state._pendiente = null; return cerrarModal(); }
+  if (t.dataset.cerrarmodal !== undefined) { limpiarPendiente(); return cerrarModal(); }
   if (t.dataset.preguntasi !== undefined) {
     const el = document.getElementById('notaCompra');
     const nota = el ? el.value.trim() : '';
-    const nombre = state._pendiente;
-    state._pendiente = null;
+    const pend = tomarPendiente();
     cerrarModal();
-    if (nombre) agregarALista(nombre, nota);
+    if (pend.modo === 'cambio') aplicarNoDisponible(pend.id);
+    if (pend.nombre) agregarALista(pend.nombre, nota);
+    return;
+  }
+  if (t.dataset.nolista !== undefined) {
+    const pend = tomarPendiente();
+    cerrarModal();
+    if (pend.modo === 'cambio') aplicarNoDisponible(pend.id);
     return;
   }
   if (t.dataset.ir) { if (t.dataset.ir === 'login') { cfg.cerrarSesion(); state.usuario = null; } return irA(t.dataset.ir); }
@@ -522,6 +543,11 @@ function onClick(e) {
   if (t.dataset.importar !== undefined) return modalImportar();
   if (t.dataset.editprod !== undefined) { const p = state.productos.find(x => String(x.id) === String(t.dataset.editprod)); if (p) modalProducto(p); return; }
   if (t.dataset.disp !== undefined) return cambiarDisponible(t.dataset.disp);
+  if (t.dataset.alista !== undefined) {
+    const p = state.productos.find(x => String(x.id) === String(t.dataset.alista));
+    if (p) modalSinExistencia(p.nombre, 'lista', p.id);
+    return;
+  }
   if (t.dataset.delprod !== undefined) return eliminarProducto(t.dataset.delprod);
 
   if (t.dataset.togglefiltros !== undefined) { if (t.dataset.togglefiltros === 'prod') state.filtrosProd = !state.filtrosProd; else state.filtrosCon = !state.filtrosCon; return render(); }
@@ -564,14 +590,21 @@ function onChange(e) {
 function cambiarDisponible(id) {
   const p = state.productos.find(x => String(x.id) === String(id));
   if (!p) return;
-  const previo = p.disponible;
-  p.disponible = !previo;
-  render(); // el cambio y la pregunta salen de inmediato
-  encolar('producto.disponible', () => ({ id, disponible: p.disponible, quien: quien() }))
-    .then(res => { if (!res.ok) { p.disponible = previo; render(); } });
-  if (!p.disponible) {
-    modalSinExistencia(p.nombre);
+  if (p.disponible) {
+    // Pasará a "No disponible": primero preguntamos (cerrar con la X no cambia nada).
+    modalSinExistencia(p.nombre, 'cambio', p.id);
+  } else {
+    marcarDisponible(p, true);
   }
+}
+
+function marcarDisponible(p, valor) {
+  const previo = p.disponible;
+  if (previo === valor) return;
+  p.disponible = valor;
+  render();
+  encolar('producto.disponible', () => ({ id: p.id, disponible: valor, quien: quien() }))
+    .then(res => { if (!res.ok) { p.disponible = previo; render(); } });
 }
 
 function guardarProducto(d) {
@@ -631,7 +664,7 @@ function agregarALista(nombre, nota) {
   const existente = state.lista.find(i => i.estado !== 'comprado' && igualProd(i.producto, nombre));
   if (existente) {
     if (nota) existente.nota = nota;
-    if (state.vista === 'lista') render(); else guardarCache();
+    render();
     encolar('lista.add', () => ({ producto: nombre, quien: quien(), nota: nota }));
     return;
   }

@@ -83,6 +83,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--teal-600); 
 .estado { border: 0; border-radius: 999px; padding: 8px 12px; font-size: .78rem; font-weight: 700; white-space: nowrap; cursor: pointer; }
 .estado.ok { background: #dcfce7; color: #15803d; }
 .estado.no { background: var(--no); color: var(--no-text); }
+.prod-lado { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; flex: none; }
+.chip.enLista { background: #dcfce7; color: #15803d; }
 
 /* Lista de mercado */
 .item { display: flex; align-items: center; gap: 12px; padding: 12px 4px; border-bottom: 1px solid var(--line); }
